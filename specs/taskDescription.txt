@@ -1,0 +1,117 @@
+The Serenity Cruises Deposit Hold Leak: Build a Payment Capture Service
+The Scenario
+Serenity Cruises, a luxury cruise operator based in Barcelona, has just escalated a critical issue to Yuno's technical team. They're losing approximately €280,000 per month due to a payment capture failure.
+
+Here's what's happening: When customers book cruises (often 6-12 months in advance), Serenity takes a 20% deposit. They authorize the customer's card for the deposit amount immediately to ensure the funds are available, but they don't capture (collect) the money right away. Instead, they capture it 7 days before the cruise departure date to reduce refund overhead if customers cancel early.
+
+The problem? Their current payment setup has no automated capture system. Their finance team manually processes captures using spreadsheets, and they're missing about 15-20% of them due to human error, timezone confusion, staff turnover, and vacation periods. When they miss the capture window, the authorization expires (most card authorizations expire after 7-30 days depending on the card network and issuer), and they have to re-authorize the customer—but by then, about 30% of those customers' cards decline (insufficient funds, expired cards, canceled cards, etc.). This represents pure revenue leakage.
+
+Serenity processes roughly 2,800 bookings per month. They need an automated system that ensures captures happen reliably at the right time.
+
+Domain Background: Authorization vs Capture
+In the payments world, there's an important distinction between authorization and capture:
+
+Authorization (Auth): When a merchant authorizes a payment, they're asking the customer's bank (the issuer) "Does this customer have enough funds/credit for this purchase?" If yes, the issuer places a temporary hold on those funds—the money is reserved but not yet transferred. The customer sees it as "pending" on their statement. Authorizations typically expire after 7-30 days depending on the card network (Visa, Mastercard, etc.) and issuer policies.
+
+Capture: This is when the merchant actually collects the money. The funds move from the customer's account to the merchant's account. A capture can only happen after a successful authorization, and it must happen before the authorization expires.
+
+Auth + Capture (or "Sale"): Most everyday purchases (like buying coffee) do both instantly—authorize and immediately capture. But in industries like hotels, car rentals, and cruises, merchants often authorize first and capture later.
+
+This two-step flow is useful when:
+
+You want to verify funds are available now but collect later (e.g., hotel holds)
+You need to adjust the amount before capturing (e.g., restaurant tips)
+You want to reduce refund processing if customers cancel before fulfillment
+If a merchant fails to capture before the authorization expires, they have to start over with a new authorization—and there's no guarantee it will succeed the second time.
+
+Your Mission
+Build a payment capture scheduling service that Serenity Cruises can use to automate their delayed capture workflow. The service should allow them to schedule future captures for authorized payments and execute those captures automatically at the right time.
+
+Functional Requirements
+Core Requirements (Must Complete)
+Capture Scheduling API
+Build a service that allows Serenity to schedule a payment capture for a future date/time. The service should accept information about an authorized payment (you can assume it's already been authorized via Yuno's platform) and a target capture timestamp. It should store this scheduled capture and make it retrievable.
+
+What "done" looks like: A developer at Serenity can call your API to schedule a capture for 7 days from now, and later query to see all scheduled captures (filtered by status, date range, etc.).
+
+Capture Execution Engine
+Build the backend logic that processes scheduled captures when their target time arrives. The system should detect which captures are due, attempt to execute them, handle success/failure states, and retry intelligently if a capture fails.
+
+What "done" looks like:
+
+Captures that are due get processed automatically (you can simulate this with a background job, cron-like scheduler, or manual trigger endpoint for demo purposes)
+If a capture succeeds, its status updates to "captured" with a timestamp
+If a capture fails, the system should retry (with exponential backoff or a simple retry count limit—your choice)
+If a capture fails after all retries, it should be marked "failed" and the reason logged
+For demo purposes, you can simulate the actual capture API call to Yuno's platform—you don't need to integrate with a real payment processor. Just simulate success/failure scenarios (e.g., 85% success rate, with random failures for insufficient funds, expired auth, network errors, etc.).
+Stretch Goals (Partial Completion Expected)
+Capture Deadline Alerts
+Add a feature that detects captures at risk of missing their authorization expiration window. For example, if an authorization expires in 30 days but the scheduled capture is set for 35 days out, flag this as a scheduling conflict. Expose these alerts via your API or a simple dashboard/report.
+
+Batch Capture Statistics
+Provide summary analytics: total scheduled, total captured successfully, total failed, average time between scheduling and capture, success rate by date range, etc. This could be an API endpoint that returns aggregated metrics, or a simple visual report.
+
+Test Data Requirements
+To build and demo your solution, you'll need a realistic dataset. Your test data should include:
+
+At least 100 scheduled captures across a 60-day window (past, present, and future dates)
+A mix of statuses: pending, captured, failed, retrying
+Booking references, customer identifiers, authorized amounts (ranging from €200 to €5,000), and scheduled capture dates
+For failed captures, include realistic failure reasons: insufficient_funds, authorization_expired, card_declined, network_timeout, issuer_unavailable
+At least 10-15 captures that should be processed "today" (or right now) so you can demonstrate the execution engine during your demo
+You can generate this data using AI tools, spreadsheets, or code.
+
+Acceptance Criteria
+Your solution is complete when:
+
+✅ A reviewer can schedule a new capture via your API (or UI if you build one) by providing a booking ID, authorized payment reference, amount, and target capture date/time
+✅ A reviewer can retrieve all scheduled captures and filter by status or date range
+✅ A reviewer can trigger (or observe) the capture execution process and see statuses update in real time or via logs
+✅ Failed captures are retried automatically, and after retry exhaustion, marked as permanently failed
+✅ The system handles edge cases gracefully: duplicate schedules, captures scheduled in the past, invalid data, etc.
+✅ Clear documentation explains how to run the system, trigger captures, and query results
+Important Notes
+Tech stack is your choice: Use any language, framework, database, or architecture you prefer
+Focus on backend logic: This is a backend-focused challenge. You do NOT need to build a UI unless you want to (a simple API with clear endpoints is perfectly sufficient)
+Time management: Aim to complete the 2 core requirements in 90 minutes, leaving time for stretch goals and documentation
+Partial stretch goal completion is welcomed: If you only finish one stretch goal or part of one, that's great
+Simulate payment captures: You don't need to integrate with a real payment gateway—just simulate success/failure responses
+Use AI tools: You're encouraged to use Claude, Cursor, Copilot, or any coding assistant to accelerate development
+Delivery Format
+Record a short 5-minute video walkthrough showing:
+
+Your system architecture (briefly)
+Scheduling a capture via your API/UI
+Triggering the execution engine and showing status updates
+Querying scheduled captures with filters
+Handling a failure and retry scenario
+Then submit your code repository (GitHub, GitLab, etc.) with a README.
+
+Deliverables
+-
+Working backend service with capture scheduling API (endpoints for creating and querying scheduled captures)
+-
+Capture execution engine with retry logic and status management (can be triggered manually or via scheduler)
+-
+Test dataset with at least 100 scheduled captures across various statuses and dates
+-
+5-minute video demo showing: scheduling captures, triggering execution, status updates, and failure/retry handling
+-
+README with setup instructions, API documentation, architecture decisions, and notes on trade-offs
+Evaluation Criteria
+Core Functionality - Capture scheduling API correctly stores and retrieves scheduled captures with filtering
+25pts
+Core Functionality - Execution engine processes due captures, updates statuses, and handles retries intelligently
+25pts
+Edge Case Handling - System gracefully handles invalid inputs, duplicates, expired auths, and failure scenarios
+15pts
+Code Quality - Clean architecture, separation of concerns, readable code, and appropriate use of patterns for a 2-hour scope
+10pts
+Test Data & Demo - Realistic test dataset and clear, well-executed video demonstration
+10pts
+Documentation - Clear README with setup steps, API docs, and architectural reasoning
+10pts
+Stretch Goals - Capture deadline alerts and/or batch statistics implemented (partial credit awarded)
+5pts
+Total
+100pts
