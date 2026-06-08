@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: payment-capture-service
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///./captures.db
+      - key: MAX_RETRIES
+        value: "3"
+      - key: RETRY_BASE_DELAY_SECONDS
+        value: "30"
+      - key: GATEWAY_SUCCESS_RATE
+        value: "0.85"
+      - key: EXECUTION_POLL_INTERVAL_SECONDS
+        value: "60"
+      - key: ALERT_THRESHOLD_HOURS
+        value: "48"
