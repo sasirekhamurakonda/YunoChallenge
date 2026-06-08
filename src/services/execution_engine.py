@@ -85,82 +85,94 @@ def _process_single(db, capture: ScheduledCapture) -> str:
     return capture.status
 
 
-def run_batch(batch_size: int = 100) -> ExecutionResult:
+def _execute_batch(db, batch_size: int) -> ExecutionResult:
+    """Core batch logic. Operates on the provided session."""
     start = time.time()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    stale_threshold = (
+        datetime.now(timezone.utc) - timedelta(minutes=_STALE_MINUTES)
+    ).isoformat()
+
+    stale = (
+        db.query(ScheduledCapture)
+        .filter(
+            ScheduledCapture.status == "processing",
+            ScheduledCapture.updated_at < stale_threshold,
+        )
+        .all()
+    )
+    for s in stale:
+        s.status = "pending"
+        s.updated_at = utcnow()
+    if stale:
+        db.commit()
+        logger.info(f"Reset {len(stale)} stale processing records to pending")
+
+    due_pending = (
+        db.query(ScheduledCapture)
+        .filter(
+            ScheduledCapture.status == "pending",
+            ScheduledCapture.scheduled_capture_at <= now_iso,
+        )
+        .limit(batch_size)
+        .all()
+    )
+
+    remaining = batch_size - len(due_pending)
+    due_retrying = []
+    if remaining > 0:
+        due_retrying = (
+            db.query(ScheduledCapture)
+            .filter(
+                ScheduledCapture.status == "retrying",
+                ScheduledCapture.next_retry_at.isnot(None),
+                ScheduledCapture.next_retry_at <= now_iso,
+            )
+            .limit(remaining)
+            .all()
+        )
+
+    due = due_pending + due_retrying
+    succeeded = failed = retrying = 0
+
+    for capture in due:
+        try:
+            status = _process_single(db, capture)
+            if status == "captured":
+                succeeded += 1
+            elif status == "retrying":
+                retrying += 1
+            else:
+                failed += 1
+        except Exception as exc:
+            logger.exception(f"Error processing capture {capture.id}: {exc}")
+            try:
+                capture.status = "pending"
+                capture.updated_at = utcnow()
+                db.commit()
+            except Exception:
+                db.rollback()
+
+    return ExecutionResult(
+        processed=len(due),
+        succeeded=succeeded,
+        failed=failed,
+        retrying=retrying,
+        duration_ms=int((time.time() - start) * 1000),
+    )
+
+
+def run_batch_with_db(db, batch_size: int = 100) -> ExecutionResult:
+    """Run a batch using an externally-provided DB session (used by API trigger)."""
+    with _lock:
+        return _execute_batch(db, batch_size)
+
+
+def run_batch(batch_size: int = 100) -> ExecutionResult:
+    """Run a batch using an internal session (used by the background scheduler)."""
     with _lock:
         db = SessionLocal()
         try:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            stale_threshold = (
-                datetime.now(timezone.utc) - timedelta(minutes=_STALE_MINUTES)
-            ).isoformat()
-
-            stale = (
-                db.query(ScheduledCapture)
-                .filter(
-                    ScheduledCapture.status == "processing",
-                    ScheduledCapture.updated_at < stale_threshold,
-                )
-                .all()
-            )
-            for s in stale:
-                s.status = "pending"
-                s.updated_at = utcnow()
-            if stale:
-                db.commit()
-                logger.info(f"Reset {len(stale)} stale processing records to pending")
-
-            due_pending = (
-                db.query(ScheduledCapture)
-                .filter(
-                    ScheduledCapture.status == "pending",
-                    ScheduledCapture.scheduled_capture_at <= now_iso,
-                )
-                .limit(batch_size)
-                .all()
-            )
-
-            remaining = batch_size - len(due_pending)
-            due_retrying = []
-            if remaining > 0:
-                due_retrying = (
-                    db.query(ScheduledCapture)
-                    .filter(
-                        ScheduledCapture.status == "retrying",
-                        ScheduledCapture.next_retry_at.isnot(None),
-                        ScheduledCapture.next_retry_at <= now_iso,
-                    )
-                    .limit(remaining)
-                    .all()
-                )
-
-            due = due_pending + due_retrying
-            succeeded = failed = retrying = 0
-
-            for capture in due:
-                try:
-                    status = _process_single(db, capture)
-                    if status == "captured":
-                        succeeded += 1
-                    elif status == "retrying":
-                        retrying += 1
-                    else:
-                        failed += 1
-                except Exception as exc:
-                    logger.exception(f"Error processing capture {capture.id}: {exc}")
-                    try:
-                        capture.status = "pending"
-                        capture.updated_at = utcnow()
-                        db.commit()
-                    except Exception:
-                        db.rollback()
-
-            return ExecutionResult(
-                processed=len(due),
-                succeeded=succeeded,
-                failed=failed,
-                retrying=retrying,
-                duration_ms=int((time.time() - start) * 1000),
-            )
+            return _execute_batch(db, batch_size)
         finally:
             db.close()
