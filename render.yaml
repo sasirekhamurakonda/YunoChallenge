@@ -7,7 +7,7 @@ services:
     plan: free
     envVars:
       - key: DATABASE_URL
-        value: sqlite:///./captures.db
+        sync: false   # set manually in Render dashboard — paste your Neon connection string
       - key: MAX_RETRIES
         value: "3"
       - key: RETRY_BASE_DELAY_SECONDS

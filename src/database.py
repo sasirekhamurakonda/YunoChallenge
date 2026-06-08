@@ -1,20 +1,22 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from src.config import settings
 
+_is_sqlite = settings.database_url.startswith("sqlite")
+
+_connect_args = {"check_same_thread": False} if _is_sqlite else {}
 
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False},
+    connect_args=_connect_args,
     echo=False,
 )
 
-
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragmas(dbapi_conn, _connection_record):
-    dbapi_conn.execute("PRAGMA journal_mode=WAL")
-    dbapi_conn.execute("PRAGMA foreign_keys=ON")
-
+if _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_conn, _record):
+        dbapi_conn.execute("PRAGMA journal_mode=WAL")
+        dbapi_conn.execute("PRAGMA foreign_keys=ON")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
