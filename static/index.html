@@ -433,13 +433,16 @@
     e.preventDefault();
     const fd = new FormData(e.target);
     const authExp = fd.get('auth_expires_at');
+    // datetime-local gives local time with no timezone — convert to UTC ISO so
+    // the backend (which treats naive datetimes as UTC) stores the right time
+    const toUTC = s => s ? new Date(s).toISOString() : null;
     const body = {
-      booking_id:          fd.get('booking_id'),
-      amount:              parseFloat(fd.get('amount')),
-      currency:            fd.get('currency'),
-      scheduled_capture_at: fd.get('scheduled_capture_at') + ':00',
-      payment_reference:   fd.get('payment_reference'),
-      ...(authExp ? { auth_expires_at: authExp + ':00' } : {}),
+      booking_id:           fd.get('booking_id'),
+      amount:               parseFloat(fd.get('amount')),
+      currency:             fd.get('currency'),
+      scheduled_capture_at: toUTC(fd.get('scheduled_capture_at')),
+      payment_reference:    fd.get('payment_reference'),
+      ...(authExp ? { auth_expires_at: toUTC(authExp) } : {}),
     };
     try {
       const r = await fetch(`${BASE}/captures`, {
@@ -479,7 +482,11 @@
   function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
   function fmtDate(s) {
     if (!s) return '—';
-    return new Date(s).toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+    return new Date(s).toLocaleString(undefined, {
+      day:'2-digit', month:'short', year:'numeric',
+      hour:'2-digit', minute:'2-digit',
+      timeZoneName:'short'   // shows IST / UTC / etc so it's always unambiguous
+    });
   }
   function statusClass(s) {
     return { pending:'bg-yellow-100 text-yellow-800', processing:'bg-blue-100 text-blue-800',
