@@ -2,7 +2,7 @@
 
 Automated payment capture scheduling service built for Serenity Cruises to eliminate ~€280K/month revenue leakage from missed manual captures.
 
-**Live demo**: `https://payment-capture-service.onrender.com/docs`
+**Live demo**: `https://yunochallenge.onrender.com/ui/`
 
 ---
 
@@ -21,7 +21,7 @@ Automated payment capture scheduling service built for Serenity Cruises to elimi
 │  APScheduler BackgroundScheduler            │
 │     └── poll_due_captures() every 60s       │
 │                                             │
-│  SQLite (captures.db — auto-created)        │
+│  Neon PostgreSQL (persistent, free tier)     │
 │     ├── scheduled_captures                  │
 │     └── capture_attempts (audit log)        │
 │                                             │
@@ -36,7 +36,7 @@ Automated payment capture scheduling service built for Serenity Cruises to elimi
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Database | SQLite | Zero infrastructure; auto-created on first run |
+| Database | Neon PostgreSQL | Free persistent DB; data survives redeploys; same region as Render (ap-southeast-1) |
 | Scheduler | APScheduler BackgroundScheduler | Runs in-process alongside uvicorn; no broker needed |
 | Concurrency safety | `threading.Lock` + `processing` status | Single-process deployment; no distributed locking needed |
 | Retry algorithm | Exponential backoff + jitter (base 30s, max 3) | Prevents thundering herd; configurable via env vars |
@@ -54,7 +54,7 @@ pip install -r requirements.txt
 uvicorn src.main:app --reload --port 8000
 ```
 
-On first start: SQLite DB is created, tables set up, and 100+ demo captures are auto-seeded.
+On first start: DB tables are created and 100+ demo captures are auto-seeded (set `DATABASE_URL` in `.env` to your Neon connection string).
 
 **OpenAPI docs**: http://localhost:8000/docs
 
@@ -73,12 +73,12 @@ pytest tests/ -v
 3. Connect your GitHub repo — Render auto-detects `render.yaml`
 4. Click **Deploy**
 
-Your service will be live at `https://<your-app>.onrender.com`
+Your service will be live at `https://yunochallenge.onrender.com`
 
 ### Keep it awake (UptimeRobot — free)
 
 1. Sign up at [uptimerobot.com](https://uptimerobot.com) (free)
-2. Add monitor: type=HTTP, URL=`https://<your-app>.onrender.com/health`, interval=5 min
+2. Add monitor: type=HTTP, URL=`https://yunochallenge.onrender.com/health`, interval=5 min
 3. Done — the service stays awake permanently
 
 ---
@@ -100,7 +100,7 @@ Your service will be live at `https://<your-app>.onrender.com`
 ### Schedule a capture
 
 ```bash
-curl -X POST https://<your-app>.onrender.com/captures \
+curl -X POST https://yunochallenge.onrender.com/captures \
   -H "Content-Type: application/json" \
   -d '{
     "booking_id": "SC-2026-DEMO-001",
@@ -115,34 +115,34 @@ curl -X POST https://<your-app>.onrender.com/captures \
 ### List pending captures
 
 ```bash
-curl "https://<your-app>.onrender.com/captures?status=pending&page=1&page_size=20"
+curl "https://yunochallenge.onrender.com/captures?status=pending&page=1&page_size=20"
 ```
 
 ### Trigger execution engine
 
 ```bash
-curl -X POST "https://<your-app>.onrender.com/execution/trigger?batch_size=50"
+curl -X POST "https://yunochallenge.onrender.com/execution/trigger?batch_size=50"
 # {"processed":12,"succeeded":10,"failed":1,"retrying":1,"duration_ms":843}
 ```
 
 ### View retry audit trail
 
 ```bash
-curl https://<your-app>.onrender.com/captures/<id>/attempts
+curl https://yunochallenge.onrender.com/captures/<id>/attempts
 ```
 
 ### Deadline alerts
 
 ```bash
-curl "https://<your-app>.onrender.com/captures/alerts"
-curl "https://<your-app>.onrender.com/captures/alerts?alert_type=expiry_imminent&threshold_hours=24"
+curl "https://yunochallenge.onrender.com/captures/alerts"
+curl "https://yunochallenge.onrender.com/captures/alerts?alert_type=expiry_imminent&threshold_hours=24"
 ```
 
 ### Statistics
 
 ```bash
-curl "https://<your-app>.onrender.com/stats"
-curl "https://<your-app>.onrender.com/stats?date_from=2026-06-01T00:00:00Z&date_to=2026-06-30T23:59:59Z"
+curl "https://yunochallenge.onrender.com/stats"
+curl "https://yunochallenge.onrender.com/stats?date_from=2026-06-01T00:00:00Z&date_to=2026-06-30T23:59:59Z"
 ```
 
 ---
@@ -151,7 +151,7 @@ curl "https://<your-app>.onrender.com/stats?date_from=2026-06-01T00:00:00Z&date_
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:///./captures.db` | SQLite file path |
+| `DATABASE_URL` | *(required)* | Neon PostgreSQL connection string |
 | `MAX_RETRIES` | `3` | Max retries per capture before permanent failure |
 | `RETRY_BASE_DELAY_SECONDS` | `30` | Base delay for exponential backoff |
 | `GATEWAY_SUCCESS_RATE` | `0.85` | Simulated payment success rate (0.0–1.0) |
@@ -175,7 +175,7 @@ pending/retrying ──[cancel]──▶ cancelled (terminal)
 
 | Trade-off | Decision |
 |-----------|----------|
-| SQLite vs PostgreSQL | SQLite for zero infra cost; upgrade path is a one-line `DATABASE_URL` change |
+| Neon PostgreSQL vs managed DB | Neon free tier is permanent (no 90-day expiry); data persists across all redeploys |
 | In-process scheduler vs task queue | APScheduler sufficient for ~93 bookings/day; Celery+Redis for high volume |
 | Single instance vs multi-instance | Single Render instance; `threading.Lock` prevents double-capture safely |
-| Ephemeral SQLite on Render | Data resets on redeploy; auto-seed runs on startup; acceptable for demo |
+| Render free tier sleep | UptimeRobot pings `/health` every 5 min to keep service awake permanently |
