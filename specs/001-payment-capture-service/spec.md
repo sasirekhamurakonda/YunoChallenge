@@ -85,7 +85,7 @@ Build an automated **Payment Capture Scheduling Service** that:
 | Invalid amount (≤0) | 422 Unprocessable |
 | Capture already `captured` or `failed` | Cannot cancel; 409 returned |
 | Authorization expired before capture | Simulated as `authorization_expired` failure |
-| Concurrent execution (same record picked twice) | Atomic `processing` lock via DB-level optimistic lock or `SELECT FOR UPDATE SKIP LOCKED` |
+| Concurrent execution (same record picked twice) | Atomic `processing` status guard + in-process `threading.Lock` (single-process); `SELECT FOR UPDATE SKIP LOCKED` available in PostgreSQL for future multi-process scale-out |
 
 ---
 
@@ -116,6 +116,6 @@ Build an automated **Payment Capture Scheduling Service** that:
 ## Out of Scope
 
 - Real Yuno payment gateway integration.
-- Frontend UI.
+- Full frontend UI (a lightweight static demo dashboard at `/ui` was added as a bonus, but is not part of the core spec).
 - Multi-merchant / multi-tenant support.
 - Webhook notifications.

@@ -8,7 +8,7 @@
 
 ## Summary
 
-Build an automated payment capture scheduling service for Serenity Cruises that eliminates their €280K/month revenue leakage from missed manual captures. The service is a **single Python process** — FastAPI REST API + APScheduler background job + SQLite database — deployed as one service on Render's free tier, accessible via a public HTTPS URL with zero infrastructure cost. The simulated payment gateway replaces real Yuno integration.
+Build an automated payment capture scheduling service for Serenity Cruises that eliminates their €280K/month revenue leakage from missed manual captures. The service is a **single Python process** — FastAPI REST API + APScheduler background job + PostgreSQL database (hosted on Neon) — deployed as one service on Render's free tier, accessible via a public HTTPS URL with zero infrastructure cost. A lightweight static demo UI is served at `/ui`. The simulated payment gateway replaces real Yuno integration.
 
 ---
 
@@ -18,28 +18,31 @@ Build an automated payment capture scheduling service for Serenity Cruises that 
 
 **Primary Dependencies**:
 - FastAPI 0.111 — REST framework with built-in OpenAPI docs at `/docs`
-- SQLAlchemy 2.x (sync) — ORM with SQLite dialect
+- SQLAlchemy 2.x (sync) — ORM with PostgreSQL dialect (psycopg2-binary driver)
 - APScheduler 3.10 — in-process background scheduler (poll every 60s)
-- Alembic — database migrations (run on startup)
 - Pydantic v2 — request/response validation
+- psycopg2-binary — PostgreSQL driver
+- aiofiles — async static file serving for the demo UI
 - uvicorn — ASGI server
 
-**Storage**: SQLite (single `.db` file — no separate database service)
+**Storage**: PostgreSQL hosted on **Neon** (serverless, free tier) — connection URL injected via `DATABASE_URL` env var. The database layer (`database.py`) also supports SQLite as a fallback for local development and tests (auto-detected from the URL scheme).
 
-**Testing**: pytest + httpx (TestClient)
+**Schema management**: `Base.metadata.create_all()` on startup — no Alembic migrations.
+
+**Testing**: pytest + httpx (TestClient); tests use an in-memory SQLite instance (SQLite fallback path).
 
 **Target Platform**: Render free tier (Linux, 512MB RAM) — single web service, free HTTPS subdomain `*.onrender.com`
 
 **Project Type**: web-service — single process, single container
 
 **Performance Goals**:
-- Serenity's load: ~93 bookings/day — SQLite handles this with ease
+- Serenity's load: ~93 bookings/day — well within Neon free tier limits
 - Execution engine: batch up to 100 due captures per poll cycle
-- API p95 response: < 300ms (well within SQLite + single-process limits)
+- API p95 response: < 300ms
 
 **Constraints**:
-- **Single service, single process** — no Docker Compose, no separate database, no Redis, no broker
-- **Zero infrastructure cost** — deploys free on Render; SQLite file lives inside the container
+- **Single service, single process** — no Docker Compose, no Redis, no broker
+- **Zero infrastructure cost** — Render free tier (app) + Neon free tier (database)
 - **Concurrency safety**: single-process asyncio means no distributed locking needed; a simple in-process `asyncio.Lock` guards the execution engine poll
 - **Seed on startup**: if DB is empty on first boot, auto-seed 100+ test captures so the demo is immediately live
 - No real payment gateway integration — 85% success simulation
@@ -48,22 +51,24 @@ Build an automated payment capture scheduling service for Serenity Cruises that 
 
 ---
 
-## Deployment Target: Render Free Tier
+## Deployment Target: Render Free Tier + Neon PostgreSQL
 
 | Property | Value |
 |----------|-------|
-| Service | Render Web Service (free) |
+| App Service | Render Web Service (free) |
 | URL | `https://payment-capture-service.onrender.com` (or similar) |
 | RAM | 512 MB |
 | CPU | 0.1 vCPU shared |
 | Deploy trigger | `git push` to GitHub → auto-deploy |
-| Database | SQLite file at `/data/captures.db` (or in-container at `./captures.db`) |
-| Cost | **$0** |
+| Database | PostgreSQL on **Neon** (serverless, free tier) — external managed service |
+| DB connection | `DATABASE_URL` env var (injected via `render.yaml` or Render dashboard) |
+| Cost | **$0** (Render free + Neon free) |
 
-**Deploy in 3 steps**:
-1. Push repo to GitHub
-2. Create Render Web Service → connect GitHub repo
-3. Set `START_CMD = uvicorn src.main:app --host 0.0.0.0 --port $PORT`
+**Deploy in 4 steps**:
+1. Create a Neon project → copy the connection string
+2. Push repo to GitHub
+3. Create Render Web Service → connect GitHub repo
+4. Set `DATABASE_URL` to the Neon connection string; start command: `uvicorn src.main:app --host 0.0.0.0 --port $PORT`
 
 ---
 
@@ -73,12 +78,12 @@ Build an automated payment capture scheduling service for Serenity Cruises that 
 
 | Gate | Status | Notes |
 |------|--------|-------|
-| No hardcoded secrets | ✅ PASS | Config via env vars / `.env` |
+| No hardcoded secrets | ✅ PASS | DB credentials loaded from `DATABASE_URL` env var; no secrets in source |
 | Input validation on all endpoints | ✅ PASS | Pydantic v2 models |
 | Idempotent execution (no double-capture) | ✅ PASS | asyncio.Lock + `processing` status guard |
 | Parameterized queries only | ✅ PASS | SQLAlchemy ORM — no raw string SQL |
 | Audit log for all state transitions | ✅ PASS | `capture_attempts` table |
-| No stack traces to client | ✅ PASS | FastAPI exception handlers return structured errors |
+| No stack traces to client | ✅ PASS | FastAPI exception handlers return structured JSON errors |
 | Structured logging on state transitions | ✅ PASS | Python `logging` with JSON formatter |
 | Single deployable unit | ✅ PASS | One process, one service, one `git push` |
 
@@ -107,12 +112,13 @@ specs/001-payment-capture-service/
 
 ```text
 src/
-├── main.py                    # FastAPI app, lifespan (migrations + scheduler start + auto-seed)
-├── config.py                  # Settings via pydantic-settings + .env
-├── database.py                # SQLAlchemy sync engine, session factory, Base
+├── main.py                    # FastAPI app, lifespan (create_all + scheduler start + auto-seed); serves /ui
+├── config.py                  # Settings via pydantic-settings + .env (DATABASE_URL, retries, etc.)
+├── database.py                # SQLAlchemy sync engine; auto-detects PostgreSQL vs SQLite from URL scheme
+├── exceptions.py              # Custom application exception classes
 ├── models/
 │   ├── scheduled_capture.py   # ScheduledCapture ORM model
-│   └── capture_attempt.py     # CaptureAttempt ORM model
+│   └── capture_attempt.py     # CaptureAttempt ORM model (audit log)
 ├── schemas/
 │   ├── capture.py             # Pydantic request/response schemas
 │   └── stats.py               # Stats/alerts response schemas
@@ -127,32 +133,29 @@ src/
 │   └── payment_gateway.py     # Simulated gateway (85% success, 5 failure modes)
 └── scheduler.py               # APScheduler setup (BackgroundScheduler, 60s interval)
 
+static/
+└── index.html                 # Demo UI served at /ui (read-only dashboard)
+
 scripts/
 └── seed_data.py               # Generate 100+ test records (called on startup if DB empty)
 
 tests/
-├── conftest.py                # In-memory SQLite fixtures, TestClient
-├── unit/
-│   ├── test_execution_engine.py
-│   └── test_payment_gateway.py
+├── conftest.py                # In-memory SQLite fixtures (SQLite fallback path), TestClient
+├── unit/                      # Unit test stubs
 └── integration/
     ├── test_capture_api.py
-    ├── test_execution_trigger.py
-    └── test_stats_alerts.py
+    └── test_execution_trigger.py
 
-migrations/
-├── env.py
-└── versions/
-    └── 001_initial_schema.py
+migrations/                    # Empty — schema managed via Base.metadata.create_all() on startup
 
-requirements.txt               # pinned deps, no dev extras bloat
-.env.example                   # template with safe defaults
-render.yaml                    # Render one-click deploy config
-Dockerfile                     # optional, for local docker run
+requirements.txt               # Pinned deps: FastAPI, SQLAlchemy, APScheduler, psycopg2-binary, aiofiles, pytest
+.env.example                   # Template — DATABASE_URL defaults to sqlite:///./captures.db for local dev
+render.yaml                    # Render one-click deploy config (sets DATABASE_URL to Neon)
+Dockerfile                     # Optional: local Docker run
 README.md
 ```
 
-**Structure Decision**: Single-project layout. No separate frontend, no Docker Compose, no database container. Everything runs in one `uvicorn` process. SQLite file is created automatically on first run.
+**Structure Decision**: Single-project layout. No separate frontend container, no Docker Compose, no Redis. Everything runs in one `uvicorn` process. Database is external (Neon PostgreSQL in production; SQLite file for local dev/tests). Schema is created automatically on startup via `create_all()`.
 
 ---
 

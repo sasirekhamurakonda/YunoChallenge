@@ -4,7 +4,7 @@
 
 **Prerequisites**: plan.md ✅ · spec.md ✅ · research.md ✅ · data-model.md ✅ · contracts/ ✅ · quickstart.md ✅
 
-**Stack**: Python 3.11 · FastAPI · SQLite · SQLAlchemy sync · APScheduler · Pydantic v2 · Render
+**Stack**: Python 3.11 · FastAPI · PostgreSQL (Neon) · SQLAlchemy sync · psycopg2-binary · APScheduler · Pydantic v2 · Render
 
 **User Stories**:
 - **US1** (P1, Core): Capture Scheduling API — FR-1
@@ -19,7 +19,7 @@
 **Purpose**: Project skeleton, dependencies, and deploy configuration. No business logic yet.
 
 - [x] T001 Create full project directory structure: `src/models/`, `src/schemas/`, `src/api/`, `src/services/`, `tests/unit/`, `tests/integration/`, `scripts/`, `migrations/versions/`
-- [x] T002 Create `requirements.txt` with pinned versions: fastapi, uvicorn[standard], sqlalchemy, alembic, pydantic-settings, apscheduler, httpx, pytest, pytest-cov
+- [x] T002 Create `requirements.txt` with pinned versions: fastapi, uvicorn[standard], sqlalchemy, pydantic-settings, apscheduler, psycopg2-binary, aiofiles, httpx, pytest, pytest-cov
 - [x] T003 [P] Create `.env.example` with all env vars and safe defaults (DATABASE_URL, MAX_RETRIES, RETRY_BASE_DELAY_SECONDS, GATEWAY_SUCCESS_RATE, EXECUTION_POLL_INTERVAL_SECONDS, ALERT_THRESHOLD_HOURS)
 - [x] T004 [P] Create `render.yaml` for one-click Render free-tier deploy with start command `uvicorn src.main:app --host 0.0.0.0 --port $PORT`
 - [x] T005 [P] Create `Dockerfile` (single-stage Python 3.11-slim, copies src/, installs requirements.txt, exposes PORT)
@@ -36,12 +36,12 @@
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
 - [x] T007 Create `src/config.py` — pydantic-settings `Settings` class reading all env vars from `.env` with defaults; export a singleton `settings` instance
-- [x] T008 Create `src/database.py` — SQLAlchemy sync engine (`create_engine` with `check_same_thread=False` for SQLite), `SessionLocal` factory, declarative `Base`; enable WAL mode via `event.listen` on connect; `get_db()` dependency
+- [x] T008 Create `src/database.py` — SQLAlchemy sync engine (`create_engine` auto-detecting PostgreSQL vs SQLite from `DATABASE_URL`); `check_same_thread=False` and WAL mode pragmas applied only for SQLite (local dev/tests); `SessionLocal` factory, declarative `Base`; `get_db()` dependency
 - [x] T009 Create `src/models/scheduled_capture.py` — `ScheduledCapture` ORM model with all columns from data-model.md; `CaptureStatus` string enum; `utcnow()` and `new_uuid()` helpers
 - [x] T010 Create `src/models/capture_attempt.py` — `CaptureAttempt` ORM model with FK to `scheduled_captures`; `AttemptStatus` string enum
 - [x] T011 Create `src/main.py` skeleton — FastAPI app with lifespan context manager that: (1) runs `Base.metadata.create_all(engine)`, (2) starts scheduler, (3) auto-seeds DB if empty; register all routers; global exception handlers returning structured `{"detail": ..., "code": ...}` JSON
 
-**Checkpoint**: `uvicorn src.main:app --reload` starts without errors. `GET /` returns 404 (no routes yet). `captures.db` file is created automatically.
+**Checkpoint**: `uvicorn src.main:app --reload` starts without errors. Tables are created in PostgreSQL (Neon) or SQLite (local fallback). `GET /health` returns `{"status": "ok"}` after routes are registered.
 
 ---
 
@@ -117,12 +117,12 @@
 **Purpose**: README, final wiring, edge case hardening, deploy validation.
 
 - [x] T027 Write `README.md` covering: project overview, architecture diagram (ASCII from quickstart.md), local setup (2 commands), Render deploy steps, UptimeRobot keep-alive setup, all API endpoints with curl examples, environment variables table, trade-offs and design decisions
-- [x] T028 [P] Add `tests/conftest.py` — in-memory SQLite `StaticPool` engine + `TestClient` fixture; override `get_db` dependency for isolated tests
+- [x] T028 [P] Add `tests/conftest.py` — in-memory SQLite `StaticPool` engine + `TestClient` fixture; override `get_db` dependency for isolated tests (database layer auto-detects SQLite from the URL scheme)
 - [x] T029 [P] Add `tests/integration/test_capture_api.py` — happy path tests: create, get, list with filter, cancel; edge cases: duplicate ref, past date, cancel-captured
 - [x] T030 [P] Add `tests/integration/test_execution_trigger.py` — seed 3 due captures, trigger, assert statuses updated and attempts created
 - [x] T031 Verify `render.yaml` deploy config end-to-end: push to GitHub, confirm Render detects `render.yaml`, confirm startup logs show DB init + auto-seed + scheduler start, confirm `/health` returns 200, confirm `/docs` loads
 
-**Checkpoint**: `pytest tests/ -v` passes. Render deploy URL is live. UptimeRobot monitor active. `/docs` accessible at `https://<app>.onrender.com/docs`.
+**Checkpoint**: `pytest tests/ -v` passes. Render deploy URL is live (backed by Neon PostgreSQL). UptimeRobot monitor active. `/docs` and `/ui` accessible at `https://<app>.onrender.com`.
 
 ---
 

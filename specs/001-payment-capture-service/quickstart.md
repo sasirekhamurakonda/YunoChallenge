@@ -1,7 +1,7 @@
 # Quickstart: Payment Capture Scheduling Service
 
-**Stack**: Python 3.11 · FastAPI · SQLite · APScheduler
-**Deploy**: Render free tier → `https://<your-app>.onrender.com`
+**Stack**: Python 3.11 · FastAPI · PostgreSQL (Neon) · APScheduler
+**Deploy**: Render free tier + Neon free tier → `https://<your-app>.onrender.com`
 
 ---
 
@@ -13,18 +13,26 @@ uvicorn src.main:app --reload --port 8000
 ```
 
 That's it. On first start:
-- SQLite DB is created at `./captures.db`
-- Tables are auto-created via `Base.metadata.create_all()`
+- Database tables are auto-created via `Base.metadata.create_all()`
 - 100+ demo captures are auto-seeded if the DB is empty
 - Background scheduler starts polling every 60 seconds
 
+**Default local DB**: If `DATABASE_URL` is not set, the app falls back to SQLite (`./captures.db`) — no Postgres setup needed for local development.
+**Production DB**: Set `DATABASE_URL` to your Neon PostgreSQL connection string (see `.env.example`).
+
 **Open API docs**: http://localhost:8000/docs
+**Demo UI**: http://localhost:8000/ui
 
 ---
 
-## Deploy Free to Render (3 steps, ~5 minutes)
+## Deploy Free to Render + Neon (4 steps, ~10 minutes)
 
-### Step 1 — Push to GitHub
+### Step 1 — Create a Neon Database (free)
+
+1. Go to [neon.tech](https://neon.tech) → Sign up free
+2. Create a new project → copy the **connection string** (looks like `postgresql://user:pass@host/dbname?sslmode=require`)
+
+### Step 2 — Push to GitHub
 
 ```bash
 git init
@@ -34,7 +42,7 @@ git remote add origin https://github.com/<you>/<repo>.git
 git push -u origin main
 ```
 
-### Step 2 — Create Render Web Service
+### Step 3 — Create Render Web Service
 
 1. Go to [render.com](https://render.com) → **New → Web Service**
 2. Connect your GitHub repo
@@ -43,14 +51,15 @@ git push -u origin main
    - **Build command**: `pip install -r requirements.txt`
    - **Start command**: `uvicorn src.main:app --host 0.0.0.0 --port $PORT`
    - **Plan**: Free
-4. Click **Deploy**
+4. Set the `DATABASE_URL` environment variable to your Neon connection string
+5. Click **Deploy**
 
-### Step 3 — Get your URL
+### Step 4 — Get your URL
 
 Render gives you: `https://payment-capture-service.onrender.com`
 
 On first boot (takes ~30s):
-- SQLite DB is initialized
+- Tables are created in Neon PostgreSQL
 - 100+ demo captures are seeded automatically
 - Background scheduler starts
 
@@ -69,6 +78,8 @@ services:
     startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
     plan: free
     envVars:
+      - key: DATABASE_URL
+        value: <your-neon-connection-string>   # set via Render dashboard
       - key: MAX_RETRIES
         value: "3"
       - key: RETRY_BASE_DELAY_SECONDS
@@ -147,38 +158,44 @@ curl "https://<your-app>.onrender.com/stats"
 ## Architecture (Single Process)
 
 ```
-┌─────────────────────────────────────────────┐
-│        One uvicorn process on Render        │
-│                                             │
-│  FastAPI (REST + /docs)                     │
-│     ├── /captures         (CRUD)            │
-│     ├── /execution/trigger (manual demo)    │
-│     ├── /captures/alerts   (stretch)        │
-│     └── /stats             (stretch)        │
-│                                             │
-│  APScheduler BackgroundScheduler            │
-│     └── poll_due_captures() every 60s       │
-│                                             │
-│  SQLite (captures.db — auto-created)        │
-│     ├── scheduled_captures                  │
-│     └── capture_attempts                    │
-│                                             │
-│  Simulated Gateway (in-process)             │
-│     └── 85% success, 5 failure modes        │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│          One uvicorn process on Render            │
+│                                                   │
+│  FastAPI (REST + /docs + /ui)                     │
+│     ├── /captures         (CRUD)                  │
+│     ├── /execution/trigger (manual demo)          │
+│     ├── /captures/alerts   (stretch)              │
+│     └── /stats             (stretch)              │
+│                                                   │
+│  APScheduler BackgroundScheduler                  │
+│     └── poll_due_captures() every 60s             │
+│                                                   │
+│  Simulated Gateway (in-process)                   │
+│     └── 85% success, 5 failure modes              │
+└──────────────────────────────────────────────────┘
+                         │
+                         │ DATABASE_URL (env var)
+                         ▼
+              ┌─────────────────────┐
+              │  Neon PostgreSQL    │  ← production
+              │  (serverless, free) │
+              │                     │
+              │  scheduled_captures │
+              │  capture_attempts   │
+              └─────────────────────┘
+
+  Local dev fallback: SQLite (./captures.db) when DATABASE_URL not set
 ```
 
-**No Docker. No Compose. No Redis. No separate DB. One service. One URL.**
+**No Docker. No Compose. No Redis. One service. One URL. $0 cost.**
 
 ---
 
 ## Environment Variables
 
-All optional — safe defaults are built in.
-
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:///./captures.db` | SQLite file path |
+| `DATABASE_URL` | `sqlite:///./captures.db` | PostgreSQL connection string in production (Neon); falls back to SQLite for local dev |
 | `MAX_RETRIES` | `3` | Max retry attempts per capture |
 | `RETRY_BASE_DELAY_SECONDS` | `30` | Base for exponential backoff |
 | `GATEWAY_SUCCESS_RATE` | `0.85` | Simulated success rate (0.0–1.0) |
@@ -226,8 +243,8 @@ def health():
 ## Render Free Tier Notes
 
 - **Always awake**: With UptimeRobot pinging every 5 min, the service never sleeps.
-- **Persistence**: SQLite file resets on each redeploy — auto-seed runs again automatically. Fine for demo.
-- **Upgrade path**: To persist data across deploys, add a Render Disk ($1/month) or swap SQLite for PostgreSQL later.
+- **Persistence**: Data is stored in Neon PostgreSQL — survives redeployments. Auto-seed only runs when the table is empty (first deploy).
+- **Neon free tier**: 0.5 GB storage, no idle shutdown — fully suitable for this demo.
 
 ---
 
@@ -237,4 +254,4 @@ def health():
 pytest tests/ -v
 ```
 
-Tests use an in-memory SQLite DB (`StaticPool`) — no setup required, fully isolated.
+Tests use an in-memory SQLite DB (`StaticPool`) — no Neon or external DB setup required. The database layer auto-detects SQLite from the URL scheme during testing.

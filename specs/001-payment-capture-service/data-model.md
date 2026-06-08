@@ -3,7 +3,7 @@
 **Phase**: 1 — Design & Contracts
 **Date**: 2026-06-08
 **Feature**: 001-payment-capture-service
-**Database**: SQLite (WAL mode) via SQLAlchemy 2.x sync ORM
+**Database**: PostgreSQL on Neon (serverless, free tier) via SQLAlchemy 2.x sync ORM + psycopg2-binary driver. SQLite used as local-dev/test fallback.
 
 ---
 
@@ -15,7 +15,7 @@ The core domain entity. One row per authorized payment that has been scheduled f
 
 **Table**: `scheduled_captures`
 
-| Column | SQLite Type | Constraints | Description |
+| Column | Type | Constraints | Description |
 |--------|-------------|-------------|-------------|
 | `id` | TEXT | PK, default `uuid4()` in Python | UUID as string |
 | `booking_id` | TEXT | NOT NULL | Serenity booking ref (e.g., `SC-2026-00123`) |
@@ -34,7 +34,7 @@ The core domain entity. One row per authorized payment that has been scheduled f
 | `created_at` | TEXT | NOT NULL, default now() in Python | Record creation time |
 | `updated_at` | TEXT | NOT NULL, updated on every write | Last modification time |
 
-> All datetimes stored as ISO 8601 UTC strings (`2026-07-15T09:00:00Z`). SQLAlchemy `DateTime` with `timezone=True` handles serialization. SQLite does not have a native datetime type — this is standard practice.
+> All datetimes are stored as ISO 8601 UTC strings (`2026-07-15T09:00:00Z`) using SQLAlchemy `String` columns. This ensures consistent serialization across both PostgreSQL (production) and SQLite (local dev/tests) without timezone conversion surprises.
 
 ---
 
@@ -44,7 +44,7 @@ Immutable audit log. One row per execution attempt (including retries). Never up
 
 **Table**: `capture_attempts`
 
-| Column | SQLite Type | Constraints | Description |
+| Column | Type | Constraints | Description |
 |--------|-------------|-------------|-------------|
 | `id` | TEXT | PK, default `uuid4()` in Python | UUID as string |
 | `scheduled_capture_id` | TEXT | NOT NULL, FK → scheduled_captures(id) | Parent capture |
@@ -55,7 +55,7 @@ Immutable audit log. One row per execution attempt (including retries). Never up
 | `attempted_at` | TEXT | NOT NULL, default now() | When this attempt was made |
 | `duration_ms` | INTEGER | NULLABLE | Gateway call duration in ms |
 
-> `gateway_response` is stored as a JSON string (TEXT) — parsed/serialized in the service layer. SQLite has no native JSONB; this is equivalent for demo purposes.
+> `gateway_response` is stored as a JSON string (TEXT) — parsed/serialized in the service layer. Using TEXT keeps this compatible with both PostgreSQL and SQLite (used for local dev/tests).
 
 ---
 
@@ -201,23 +201,17 @@ class CaptureAttempt(Base):
 
 ---
 
-## Indexes (via Alembic migration)
+## Indexes
 
 ```python
-# migrations/versions/001_initial_schema.py
-from alembic import op
-import sqlalchemy as sa
-
-def upgrade():
-    # Tables created by Base.metadata.create_all() in database.py on startup
-    # Additional performance indexes:
-    op.create_index("idx_sc_status_scheduled",  "scheduled_captures", ["status", "scheduled_capture_at"])
-    op.create_index("idx_sc_status_next_retry", "scheduled_captures", ["status", "next_retry_at"])
-    op.create_index("idx_sc_booking_id",        "scheduled_captures", ["booking_id"])
-    op.create_index("idx_ca_parent",            "capture_attempts",   ["scheduled_capture_id"])
+# Applied via Base.metadata.create_all() — declared directly on the ORM models
+Index("idx_sc_status_scheduled",  ScheduledCapture.status, ScheduledCapture.scheduled_capture_at)
+Index("idx_sc_status_next_retry", ScheduledCapture.status, ScheduledCapture.next_retry_at)
+Index("idx_sc_booking_id",        ScheduledCapture.booking_id)
+Index("idx_ca_parent",            CaptureAttempt.scheduled_capture_id)
 ```
 
-> Alternatively, because this is a demo with SQLite, `Base.metadata.create_all(engine)` on startup is sufficient and simpler than running Alembic — the migration file is kept for documentation and future PostgreSQL upgrade path.
+> Indexes are declared on the SQLAlchemy models and applied automatically by `Base.metadata.create_all()` on startup. No Alembic migrations are used — schema management is handled entirely by SQLAlchemy for this demo scope.
 
 ---
 
