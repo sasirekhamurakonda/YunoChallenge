@@ -217,18 +217,18 @@
           </div>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Scheduled At</label>
-          <input name="scheduled_at" type="datetime-local" required
+          <label class="block text-xs font-medium text-gray-600 mb-1">Scheduled Capture At</label>
+          <input name="scheduled_capture_at" type="datetime-local" required
             class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Deadline</label>
-          <input name="deadline" type="datetime-local" required
+          <label class="block text-xs font-medium text-gray-600 mb-1">Auth Expires At <span class="text-gray-400">(optional)</span></label>
+          <input name="auth_expires_at" type="datetime-local"
             class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-600 mb-1">Payment Token</label>
-          <input name="payment_token" required placeholder="tok_visa_4242"
+          <label class="block text-xs font-medium text-gray-600 mb-1">Payment Reference</label>
+          <input name="payment_reference" required placeholder="tok_visa_4242"
             class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
         </div>
         <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg text-sm transition">
@@ -250,13 +250,13 @@
   document.addEventListener('DOMContentLoaded', () => {
     switchTab('dashboard');
     checkHealth();
-    // default scheduled_at / deadline to sensible times
+    // default scheduled_capture_at / auth_expires_at to sensible times
     const now = new Date();
     const pad = v => String(v).padStart(2,'0');
     const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    const deadline = new Date(now.getTime() + 3*24*60*60*1000);
-    document.querySelector('[name=scheduled_at]').value = fmt(now);
-    document.querySelector('[name=deadline]').value = fmt(deadline);
+    const expires = new Date(now.getTime() + 3*24*60*60*1000);
+    document.querySelector('[name=scheduled_capture_at]').value = fmt(now);
+    document.querySelector('[name=auth_expires_at]').value = fmt(expires);
   });
 
   // ── TABS ──────────────────────────────────────────────────────────────────
@@ -291,22 +291,23 @@
     try {
       const r = await fetch(BASE + '/stats');
       const d = await r.json();
-      document.getElementById('stat-total').textContent    = d.total_captures ?? '—';
-      document.getElementById('stat-pending').textContent  = d.pending ?? '—';
-      document.getElementById('stat-captured').textContent = d.captured ?? '—';
-      document.getElementById('stat-failed').textContent   = d.failed ?? '—';
-      const rev = d.total_captured_amount ?? 0;
-      document.getElementById('stat-revenue').textContent  = '$' + Number(rev).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
-      const rate = d.success_rate != null ? Math.round(d.success_rate * 100) : null;
+      const t = d.totals ?? {};
+      document.getElementById('stat-total').textContent    = t.scheduled ?? '—';
+      document.getElementById('stat-pending').textContent  = t.pending ?? '—';
+      document.getElementById('stat-captured').textContent = t.captured ?? '—';
+      document.getElementById('stat-failed').textContent   = t.failed ?? '—';
+      // revenue not in API — hide that card gracefully
+      document.getElementById('stat-revenue').textContent  = 'N/A';
+      const rate = d.success_rate_pct != null ? Math.round(d.success_rate_pct) : null;
       document.getElementById('stat-rate').textContent     = rate != null ? rate + '%' : '—';
       document.getElementById('rate-bar').style.width      = (rate ?? 0) + '%';
-      drawChart(d);
+      drawChart(t);
     } catch(e) { console.error(e); }
   }
 
-  function drawChart(d) {
+  function drawChart(t) {
     const labels = ['Pending','Processing','Captured','Failed','Cancelled'];
-    const values = [d.pending??0, d.processing??0, d.captured??0, d.failed??0, d.cancelled??0];
+    const values = [t.pending??0, t.processing??0, t.captured??0, t.failed??0, t.cancelled??0];
     const colors = ['#fbbf24','#60a5fa','#34d399','#f87171','#d1d5db'];
     if (statusChart) statusChart.destroy();
     statusChart = new Chart(document.getElementById('status-chart'), {
@@ -333,7 +334,7 @@
       const r = await fetch(url);
       const d = await r.json();
       const items = d.items ?? [];
-      totalPages  = d.total_pages ?? 1;
+      totalPages  = d.pages ?? 1;
       document.getElementById('captures-info').textContent =
         `${d.total ?? 0} total · page ${page} of ${totalPages}`;
       document.getElementById('prev-btn').disabled = page <= 1;
@@ -349,8 +350,8 @@
           <td class="px-4 py-3 text-sm font-medium text-gray-900">${Number(c.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
           <td class="px-4 py-3 text-xs text-gray-500">${esc(c.currency)}</td>
           <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full font-medium ${statusClass(c.status)}">${c.status}</span></td>
-          <td class="px-4 py-3 text-xs text-gray-500">${fmtDate(c.scheduled_at)}</td>
-          <td class="px-4 py-3 text-xs ${deadlineClass(c.deadline, c.status)}">${fmtDate(c.deadline)}</td>
+          <td class="px-4 py-3 text-xs text-gray-500">${fmtDate(c.scheduled_capture_at)}</td>
+          <td class="px-4 py-3 text-xs ${deadlineClass(c.auth_expires_at, c.status)}">${fmtDate(c.auth_expires_at)}</td>
           <td class="px-4 py-3 text-xs text-gray-500">${c.retry_count ?? 0}/${c.max_retries ?? 3}</td>
           <td class="px-4 py-3 flex gap-2">
             <button onclick="showAttempts('${c.id}')" class="text-xs text-indigo-600 hover:underline">History</button>
@@ -383,7 +384,7 @@
           ${items.map(a => `<tr>
             <td class="px-3 py-2">${a.attempt_number}</td>
             <td class="px-3 py-2 text-gray-500">${fmtDate(a.attempted_at)}</td>
-            <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full font-medium ${a.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}">${a.success ? 'Success' : 'Failed'}</span></td>
+            <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full font-medium ${a.status==='success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}">${a.status==='success' ? 'Success' : 'Failed'}</span></td>
             <td class="px-3 py-2 text-gray-400 max-w-xs truncate">${esc(a.gateway_response ?? '—')}</td>
           </tr>`).join('')}
         </tbody>
@@ -420,8 +421,8 @@
             <p class="text-xs text-gray-500 mt-0.5">$${Number(a.amount).toLocaleString()} ${esc(a.currency)} · ${a.retry_count} retries</p>
           </div>
           <div class="text-right">
-            <p class="text-xs font-semibold text-orange-600">${esc(a.hours_until_deadline)} hrs left</p>
-            <p class="text-xs text-gray-400 mt-0.5">Deadline: ${fmtDate(a.deadline)}</p>
+            <p class="text-xs font-semibold text-orange-600">${a.hours_until_expiry != null ? Math.round(a.hours_until_expiry) + ' hrs left' : 'Expiring soon'}</p>
+            <p class="text-xs text-gray-400 mt-0.5">Expires: ${fmtDate(a.auth_expires_at)}</p>
           </div>
         </div>`).join('');
     } catch(e) { el.innerHTML = `<p class="text-red-400 text-sm text-center">${e.message}</p>`; }
@@ -431,13 +432,14 @@
   async function submitCapture(e) {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const authExp = fd.get('auth_expires_at');
     const body = {
-      booking_id:    fd.get('booking_id'),
-      amount:        parseFloat(fd.get('amount')),
-      currency:      fd.get('currency'),
-      scheduled_at:  fd.get('scheduled_at') + ':00',
-      deadline:      fd.get('deadline') + ':00',
-      payment_token: fd.get('payment_token'),
+      booking_id:          fd.get('booking_id'),
+      amount:              parseFloat(fd.get('amount')),
+      currency:            fd.get('currency'),
+      scheduled_capture_at: fd.get('scheduled_capture_at') + ':00',
+      payment_reference:   fd.get('payment_reference'),
+      ...(authExp ? { auth_expires_at: authExp + ':00' } : {}),
     };
     try {
       const r = await fetch(`${BASE}/captures`, {
