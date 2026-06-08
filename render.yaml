@@ -7,7 +7,7 @@ services:
     plan: free
     envVars:
       - key: DATABASE_URL
-        sync: false   # set manually in Render dashboard — paste your Neon connection string
+        value: postgresql://neondb_owner:npg_qs42uzbpHrmw@ep-wandering-cloud-aohsu6pd-pooler.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: MAX_RETRIES
         value: "3"
       - key: RETRY_BASE_DELAY_SECONDS
