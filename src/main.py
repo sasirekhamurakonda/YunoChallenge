@@ -1,9 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.config import settings
 from src.database import engine, Base
@@ -84,6 +86,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/ui")
+
+
 @app.get("/health", tags=["health"])
 def health():
     return {"status": "ok", "version": "1.0.0"}
@@ -96,3 +103,8 @@ app.include_router(alerts.router)    # /captures/alerts — must be before /{cap
 app.include_router(captures.router)  # /captures, /captures/{id}, ...
 app.include_router(execution.router) # /execution/trigger
 app.include_router(stats.router)     # /stats
+
+# Serve the demo UI at /ui
+_static = Path(__file__).parent.parent / "static"
+if _static.exists():
+    app.mount("/ui", StaticFiles(directory=str(_static), html=True), name="ui")

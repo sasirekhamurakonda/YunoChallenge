@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Payment Capture Service — Serenity Cruises</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .status-pending    { @apply bg-yellow-100 text-yellow-800; }
+    .status-processing { @apply bg-blue-100 text-blue-800; }
+    .status-captured   { @apply bg-green-100 text-green-800; }
+    .status-failed     { @apply bg-red-100 text-red-800; }
+    .status-cancelled  { @apply bg-gray-100 text-gray-600; }
+    .tab-active { border-bottom: 3px solid #6366f1; color: #6366f1; font-weight: 600; }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- HEADER -->
+<header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
+        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-base font-semibold text-gray-900">Payment Capture Service</h1>
+        <p class="text-xs text-gray-500">Serenity Cruises</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="health-badge" class="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-500">Checking...</span>
+      <button onclick="triggerExecution()" id="trigger-btn"
+        class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Run Capture Now
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- TABS -->
+<div class="bg-white border-b border-gray-200">
+  <div class="max-w-7xl mx-auto px-6 flex gap-8">
+    <button class="tab py-3 text-sm text-gray-500 hover:text-gray-900 transition" data-tab="dashboard" onclick="switchTab('dashboard')">Dashboard</button>
+    <button class="tab py-3 text-sm text-gray-500 hover:text-gray-900 transition" data-tab="captures" onclick="switchTab('captures')">Captures</button>
+    <button class="tab py-3 text-sm text-gray-500 hover:text-gray-900 transition" data-tab="alerts" onclick="switchTab('alerts')">
+      Alerts <span id="alert-count" class="ml-1 text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full hidden"></span>
+    </button>
+    <button class="tab py-3 text-sm text-gray-500 hover:text-gray-900 transition" data-tab="schedule" onclick="switchTab('schedule')">Schedule Capture</button>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+  <div id="toast-inner" class="px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white flex items-center gap-2 max-w-sm"></div>
+</div>
+
+<!-- MAIN -->
+<main class="max-w-7xl mx-auto px-6 py-8">
+
+  <!-- DASHBOARD TAB -->
+  <div id="tab-dashboard" class="tab-content fade-in">
+    <!-- Stat cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Total</p>
+        <p id="stat-total" class="text-3xl font-bold text-gray-900">—</p>
+      </div>
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-yellow-600 uppercase tracking-wide mb-1">Pending</p>
+        <p id="stat-pending" class="text-3xl font-bold text-yellow-600">—</p>
+      </div>
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-green-600 uppercase tracking-wide mb-1">Captured</p>
+        <p id="stat-captured" class="text-3xl font-bold text-green-600">—</p>
+      </div>
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-red-500 uppercase tracking-wide mb-1">Failed</p>
+        <p id="stat-failed" class="text-3xl font-bold text-red-500">—</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+      <!-- Revenue card -->
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Total Captured Revenue</p>
+        <p id="stat-revenue" class="text-3xl font-bold text-indigo-600">—</p>
+        <p class="text-xs text-gray-400 mt-1">Successfully processed</p>
+      </div>
+      <!-- Success rate -->
+      <div class="bg-white rounded-xl p-5 border border-gray-200 shadow-sm">
+        <p class="text-xs text-gray-500 uppercase tracking-wide mb-2">Capture Success Rate</p>
+        <div class="flex items-end gap-3">
+          <p id="stat-rate" class="text-3xl font-bold text-gray-900">—</p>
+          <p class="text-sm text-gray-400 mb-1">of attempted captures</p>
+        </div>
+        <div class="w-full bg-gray-100 rounded-full h-2 mt-3">
+          <div id="rate-bar" class="bg-indigo-500 h-2 rounded-full transition-all duration-700" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="bg-white rounded-xl p-6 border border-gray-200 shadow-sm">
+      <h2 class="text-sm font-semibold text-gray-700 mb-4">Status Distribution</h2>
+      <div class="flex justify-center"><canvas id="status-chart" style="max-height:260px; max-width:320px;"></canvas></div>
+    </div>
+  </div>
+
+  <!-- CAPTURES TAB -->
+  <div id="tab-captures" class="tab-content fade-in hidden">
+    <div class="flex flex-wrap gap-3 mb-5 items-center justify-between">
+      <div class="flex gap-2 flex-wrap">
+        <select id="filter-status" onchange="loadCaptures(1)" class="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-300 outline-none">
+          <option value="">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="processing">Processing</option>
+          <option value="captured">Captured</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <input id="filter-booking" type="text" placeholder="Booking ID…" onkeydown="if(event.key==='Enter')loadCaptures(1)"
+          class="text-sm border border-gray-200 rounded-lg px-3 py-2 w-44 bg-white focus:ring-2 focus:ring-indigo-300 outline-none"/>
+        <button onclick="loadCaptures(1)" class="text-sm bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg transition">Search</button>
+      </div>
+      <button onclick="loadCaptures(1)" class="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Refresh
+      </button>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Booking ID</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Amount</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Currency</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Scheduled At</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Deadline</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Retries</th>
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="captures-body" class="divide-y divide-gray-100">
+            <tr><td colspan="8" class="text-center py-10 text-gray-400">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Pagination -->
+      <div class="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50">
+        <p id="captures-info" class="text-xs text-gray-500"></p>
+        <div class="flex gap-2">
+          <button id="prev-btn" onclick="loadCaptures(currentPage-1)" class="text-xs px-3 py-1.5 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed" disabled>← Prev</button>
+          <button id="next-btn" onclick="loadCaptures(currentPage+1)" class="text-xs px-3 py-1.5 rounded border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed" disabled>Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attempts drawer -->
+    <div id="attempts-panel" class="hidden mt-6 bg-white rounded-xl border border-gray-200 shadow-sm p-5 fade-in">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="font-semibold text-gray-800">Capture Attempts</h3>
+        <button onclick="document.getElementById('attempts-panel').classList.add('hidden')" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+      <div id="attempts-body"></div>
+    </div>
+  </div>
+
+  <!-- ALERTS TAB -->
+  <div id="tab-alerts" class="tab-content fade-in hidden">
+    <div class="mb-4 flex items-center justify-between">
+      <p class="text-sm text-gray-500">Captures approaching their payment deadline.</p>
+      <button onclick="loadAlerts()" class="text-sm text-indigo-600 hover:underline">Refresh</button>
+    </div>
+    <div id="alerts-list" class="space-y-3">
+      <p class="text-gray-400 text-sm text-center py-10">Loading…</p>
+    </div>
+  </div>
+
+  <!-- SCHEDULE TAB -->
+  <div id="tab-schedule" class="tab-content fade-in hidden">
+    <div class="max-w-lg mx-auto bg-white rounded-xl border border-gray-200 shadow-sm p-7">
+      <h2 class="text-base font-semibold text-gray-900 mb-5">Schedule a New Capture</h2>
+      <form id="schedule-form" onsubmit="submitCapture(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Booking ID</label>
+          <input name="booking_id" required placeholder="BK-12345"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Amount</label>
+            <input name="amount" type="number" step="0.01" min="0.01" required placeholder="1200.00"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">Currency</label>
+            <select name="currency" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none bg-white">
+              <option>USD</option><option>EUR</option><option>GBP</option><option>SGD</option><option>AUD</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Scheduled At</label>
+          <input name="scheduled_at" type="datetime-local" required
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Deadline</label>
+          <input name="deadline" type="datetime-local" required
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Payment Token</label>
+          <input name="payment_token" required placeholder="tok_visa_4242"
+            class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-300 outline-none"/>
+        </div>
+        <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg text-sm transition">
+          Schedule Capture
+        </button>
+      </form>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  const BASE = '';  // same origin
+  let currentPage = 1;
+  let totalPages = 1;
+  let statusChart = null;
+
+  // ── INIT ─────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    switchTab('dashboard');
+    checkHealth();
+    // default scheduled_at / deadline to sensible times
+    const now = new Date();
+    const pad = v => String(v).padStart(2,'0');
+    const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const deadline = new Date(now.getTime() + 3*24*60*60*1000);
+    document.querySelector('[name=scheduled_at]').value = fmt(now);
+    document.querySelector('[name=deadline]').value = fmt(deadline);
+  });
+
+  // ── TABS ──────────────────────────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('tab-active'));
+    document.getElementById('tab-' + name).classList.remove('hidden');
+    document.querySelector(`.tab[data-tab="${name}"]`).classList.add('tab-active');
+    if (name === 'dashboard') loadStats();
+    if (name === 'captures') loadCaptures(1);
+    if (name === 'alerts') loadAlerts();
+  }
+
+  // ── HEALTH ────────────────────────────────────────────────────────────────
+  async function checkHealth() {
+    try {
+      const r = await fetch(BASE + '/health');
+      const badge = document.getElementById('health-badge');
+      if (r.ok) {
+        badge.textContent = '● Live';
+        badge.className = 'text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-700';
+      } else throw new Error();
+    } catch {
+      const badge = document.getElementById('health-badge');
+      badge.textContent = '● Offline';
+      badge.className = 'text-xs px-2.5 py-1 rounded-full bg-red-100 text-red-600';
+    }
+  }
+
+  // ── STATS / DASHBOARD ─────────────────────────────────────────────────────
+  async function loadStats() {
+    try {
+      const r = await fetch(BASE + '/stats');
+      const d = await r.json();
+      document.getElementById('stat-total').textContent    = d.total_captures ?? '—';
+      document.getElementById('stat-pending').textContent  = d.pending ?? '—';
+      document.getElementById('stat-captured').textContent = d.captured ?? '—';
+      document.getElementById('stat-failed').textContent   = d.failed ?? '—';
+      const rev = d.total_captured_amount ?? 0;
+      document.getElementById('stat-revenue').textContent  = '$' + Number(rev).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+      const rate = d.success_rate != null ? Math.round(d.success_rate * 100) : null;
+      document.getElementById('stat-rate').textContent     = rate != null ? rate + '%' : '—';
+      document.getElementById('rate-bar').style.width      = (rate ?? 0) + '%';
+      drawChart(d);
+    } catch(e) { console.error(e); }
+  }
+
+  function drawChart(d) {
+    const labels = ['Pending','Processing','Captured','Failed','Cancelled'];
+    const values = [d.pending??0, d.processing??0, d.captured??0, d.failed??0, d.cancelled??0];
+    const colors = ['#fbbf24','#60a5fa','#34d399','#f87171','#d1d5db'];
+    if (statusChart) statusChart.destroy();
+    statusChart = new Chart(document.getElementById('status-chart'), {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { font: { size: 12 }, boxWidth: 12 } } },
+        cutout: '65%'
+      }
+    });
+  }
+
+  // ── CAPTURES ──────────────────────────────────────────────────────────────
+  async function loadCaptures(page = 1) {
+    currentPage = page;
+    const status  = document.getElementById('filter-status').value;
+    const booking = document.getElementById('filter-booking').value.trim();
+    let url = `${BASE}/captures?page=${page}&page_size=15`;
+    if (status)  url += `&status=${status}`;
+    if (booking) url += `&booking_id=${encodeURIComponent(booking)}`;
+    const tbody = document.getElementById('captures-body');
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-10 text-gray-400">Loading…</td></tr>';
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      const items = d.items ?? [];
+      totalPages  = d.total_pages ?? 1;
+      document.getElementById('captures-info').textContent =
+        `${d.total ?? 0} total · page ${page} of ${totalPages}`;
+      document.getElementById('prev-btn').disabled = page <= 1;
+      document.getElementById('next-btn').disabled = page >= totalPages;
+
+      if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-10 text-gray-400">No captures found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = items.map(c => `
+        <tr class="hover:bg-gray-50 transition">
+          <td class="px-4 py-3 font-mono text-xs text-gray-700">${esc(c.booking_id)}</td>
+          <td class="px-4 py-3 text-sm font-medium text-gray-900">${Number(c.amount).toLocaleString('en-US',{minimumFractionDigits:2})}</td>
+          <td class="px-4 py-3 text-xs text-gray-500">${esc(c.currency)}</td>
+          <td class="px-4 py-3"><span class="text-xs px-2 py-0.5 rounded-full font-medium ${statusClass(c.status)}">${c.status}</span></td>
+          <td class="px-4 py-3 text-xs text-gray-500">${fmtDate(c.scheduled_at)}</td>
+          <td class="px-4 py-3 text-xs ${deadlineClass(c.deadline, c.status)}">${fmtDate(c.deadline)}</td>
+          <td class="px-4 py-3 text-xs text-gray-500">${c.retry_count ?? 0}/${c.max_retries ?? 3}</td>
+          <td class="px-4 py-3 flex gap-2">
+            <button onclick="showAttempts('${c.id}')" class="text-xs text-indigo-600 hover:underline">History</button>
+            ${c.status === 'pending' || c.status === 'failed' ? `<button onclick="cancelCapture('${c.id}')" class="text-xs text-red-500 hover:underline">Cancel</button>` : ''}
+          </td>
+        </tr>`).join('');
+    } catch(e) {
+      tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-red-400">Error loading captures: ${e.message}</td></tr>`;
+    }
+  }
+
+  // ── ATTEMPTS ──────────────────────────────────────────────────────────────
+  async function showAttempts(id) {
+    const panel = document.getElementById('attempts-panel');
+    const body  = document.getElementById('attempts-body');
+    body.innerHTML = '<p class="text-gray-400 text-sm">Loading…</p>';
+    panel.classList.remove('hidden');
+    try {
+      const r = await fetch(`${BASE}/captures/${id}/attempts`);
+      const items = await r.json();
+      if (!items.length) { body.innerHTML = '<p class="text-sm text-gray-400">No attempts yet.</p>'; return; }
+      body.innerHTML = `<table class="w-full text-xs">
+        <thead class="bg-gray-50"><tr>
+          <th class="text-left px-3 py-2 text-gray-500">#</th>
+          <th class="text-left px-3 py-2 text-gray-500">Attempted At</th>
+          <th class="text-left px-3 py-2 text-gray-500">Result</th>
+          <th class="text-left px-3 py-2 text-gray-500">Gateway Response</th>
+        </tr></thead>
+        <tbody class="divide-y divide-gray-100">
+          ${items.map(a => `<tr>
+            <td class="px-3 py-2">${a.attempt_number}</td>
+            <td class="px-3 py-2 text-gray-500">${fmtDate(a.attempted_at)}</td>
+            <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full font-medium ${a.success ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}">${a.success ? 'Success' : 'Failed'}</span></td>
+            <td class="px-3 py-2 text-gray-400 max-w-xs truncate">${esc(a.gateway_response ?? '—')}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    } catch(e) { body.innerHTML = `<p class="text-red-400 text-sm">${e.message}</p>`; }
+  }
+
+  // ── CANCEL ────────────────────────────────────────────────────────────────
+  async function cancelCapture(id) {
+    if (!confirm('Cancel this capture?')) return;
+    try {
+      const r = await fetch(`${BASE}/captures/${id}/cancel`, { method: 'POST' });
+      if (r.ok) { toast('Capture cancelled.', 'ok'); loadCaptures(currentPage); }
+      else { const e = await r.json(); toast(e.detail ?? 'Cannot cancel.', 'err'); }
+    } catch(e) { toast(e.message, 'err'); }
+  }
+
+  // ── ALERTS ────────────────────────────────────────────────────────────────
+  async function loadAlerts() {
+    const el = document.getElementById('alerts-list');
+    el.innerHTML = '<p class="text-gray-400 text-sm text-center py-10">Loading…</p>';
+    try {
+      const r = await fetch(`${BASE}/captures/alerts`);
+      const d = await r.json();
+      const items = d.alerts ?? [];
+      const badge = document.getElementById('alert-count');
+      if (items.length) { badge.textContent = items.length; badge.classList.remove('hidden'); }
+      else { badge.classList.add('hidden'); }
+      if (!items.length) { el.innerHTML = '<p class="text-sm text-gray-400 text-center py-10">No upcoming deadline alerts. All clear!</p>'; return; }
+      el.innerHTML = items.map(a => `
+        <div class="bg-white border border-orange-200 rounded-xl p-4 flex items-start justify-between shadow-sm">
+          <div>
+            <p class="text-sm font-semibold text-gray-800 font-mono">${esc(a.booking_id)}</p>
+            <p class="text-xs text-gray-500 mt-0.5">$${Number(a.amount).toLocaleString()} ${esc(a.currency)} · ${a.retry_count} retries</p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs font-semibold text-orange-600">${esc(a.hours_until_deadline)} hrs left</p>
+            <p class="text-xs text-gray-400 mt-0.5">Deadline: ${fmtDate(a.deadline)}</p>
+          </div>
+        </div>`).join('');
+    } catch(e) { el.innerHTML = `<p class="text-red-400 text-sm text-center">${e.message}</p>`; }
+  }
+
+  // ── SCHEDULE FORM ─────────────────────────────────────────────────────────
+  async function submitCapture(e) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      booking_id:    fd.get('booking_id'),
+      amount:        parseFloat(fd.get('amount')),
+      currency:      fd.get('currency'),
+      scheduled_at:  fd.get('scheduled_at') + ':00',
+      deadline:      fd.get('deadline') + ':00',
+      payment_token: fd.get('payment_token'),
+    };
+    try {
+      const r = await fetch(`${BASE}/captures`, {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body)
+      });
+      if (r.ok) {
+        toast('Capture scheduled!', 'ok');
+        e.target.reset();
+        switchTab('captures');
+      } else {
+        const err = await r.json();
+        toast(err.detail ?? 'Failed to schedule.', 'err');
+      }
+    } catch(err) { toast(err.message, 'err'); }
+  }
+
+  // ── TRIGGER EXECUTION ─────────────────────────────────────────────────────
+  async function triggerExecution() {
+    const btn = document.getElementById('trigger-btn');
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg> Running…`;
+    try {
+      const r = await fetch(`${BASE}/execution/trigger`, { method: 'POST' });
+      const d = await r.json();
+      if (r.ok) {
+        toast(`Processed ${d.processed ?? 0} capture(s). ${d.succeeded ?? 0} succeeded, ${d.failed ?? 0} failed.`, 'ok');
+        loadStats(); loadCaptures(currentPage);
+      } else { toast(d.detail ?? 'Trigger failed.', 'err'); }
+    } catch(e) { toast(e.message, 'err'); }
+    finally {
+      btn.disabled = false;
+      btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> Run Capture Now`;
+    }
+  }
+
+  // ── HELPERS ───────────────────────────────────────────────────────────────
+  function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+  function fmtDate(s) {
+    if (!s) return '—';
+    return new Date(s).toLocaleString('en-GB', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+  function statusClass(s) {
+    return { pending:'bg-yellow-100 text-yellow-800', processing:'bg-blue-100 text-blue-800',
+             captured:'bg-green-100 text-green-800', failed:'bg-red-100 text-red-700',
+             cancelled:'bg-gray-100 text-gray-500' }[s] ?? 'bg-gray-100 text-gray-500';
+  }
+  function deadlineClass(deadline, status) {
+    if (status === 'captured' || status === 'cancelled') return 'text-gray-400';
+    const hrs = (new Date(deadline) - Date.now()) / 3600000;
+    return hrs < 24 ? 'text-orange-600 font-semibold' : 'text-gray-500';
+  }
+  function toast(msg, type) {
+    const t  = document.getElementById('toast');
+    const ti = document.getElementById('toast-inner');
+    ti.className = 'px-4 py-3 rounded-lg shadow-lg text-sm font-medium text-white flex items-center gap-2 max-w-sm ' +
+      (type === 'ok' ? 'bg-green-600' : 'bg-red-500');
+    ti.innerHTML = (type === 'ok' ? '✓ ' : '✕ ') + esc(msg);
+    t.classList.remove('hidden');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => t.classList.add('hidden'), 4000);
+  }
+</script>
+</body>
+</html>
